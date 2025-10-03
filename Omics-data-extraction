@@ -1,0 +1,96 @@
+###gene expression data
+
+library(BiocManager)
+library(TCGAbiolinks)
+
+paadquery <- GDCquery(project = "TCGA-PAAD", 
+                      data.category = "Transcriptome Profiling",
+                      data.type = "Gene Expression Quantification",
+                      workflow.type = "STAR - Counts", legacy = F,
+                      experimental.strategy = "RNA-Seq") 
+
+GDCdownload(query = paadquery, method = "api",) 
+
+paadprepare <- GDCprepare(query = paadquery, summarizedExperiment = T)
+
+save(paadprepare, file = "paadpreparation.RData")
+f= load(file = "paadpreparation.RData")
+
+library(SummarizedExperiment)
+rawdata <- assay(paadprepare)   
+save(paadprepare, file = "rawdata.RData")
+
+
+#extact genes
+gene <- SummarizedExperiment::rowRanges(paadprepare)   
+gene <- data.frame(gene)    
+
+
+
+
+
+####Metylom data
+
+library(BiocManager)
+library(TCGAbiolinks)
+
+paadquery.idat <- GDCquery(project = "TCGA-PAAD", 
+                           data.category = "DNA Methylation",
+                           data.type = "Masked Intensities",
+                           legacy = F,
+                           experimental.strategy = "Methylation Array",
+                           platform = "Illumina Human Methylation 450") 
+
+
+GDCdownload(query = paadquery.idat, method = "api",)   #390 file
+
+BiocManager::install("sesameData")
+BiocManager::install("sesame")
+
+paadprepare.idat <- GDCprepare(query =paadquery.idat, summarizedExperiment = T)
+
+save(paadprepare.idat, file = "paadprepare.idat.RData")
+
+library(SummarizedExperiment)
+rawdata.idat <- assay(paadprepare.idat) 
+
+
+
+
+
+###mutation data
+
+mutation.paad.query.1 <- GDCquery(
+  project = "TCGA-PAAD", 
+  data.category = "Simple Nucleotide Variation", 
+  access = "open", 
+  legacy = FALSE, 
+  data.type = "Masked Somatic Mutation", 
+  workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking")
+
+
+GDCdownload(mutation.paad.query.1)
+
+mutation.paad.prepare.1 <- GDCprepare(mutation.paad.query.1) 
+
+save(mutation.paad.prepare.1 , file = "mutation.paad.prepare.1.RData")
+
+mutt <- mutation.paad.prepare.1[ ,c(49,2,62,135,17,10,53,123,41:44)]  
+
+
+
+
+
+###CNV data
+
+paad.cnv.query1 <- GDCquery(project = "TCGA-PAAD",
+                            data.category = "Copy Number Variation",
+                            data.type = "Masked Copy Number Segment",              
+                            access = "open")
+
+GDCdownload(paad.cnv.query1)
+
+paad.cnv.prepare1 <- GDCprepare(paad.cnv.query1)
+
+seg.paad <- paad.cnv.prepare1[ ,c(7,2,3,4,6)]
+
