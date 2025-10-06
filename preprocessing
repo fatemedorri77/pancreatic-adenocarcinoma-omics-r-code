@@ -1,0 +1,242 @@
+###gene expression
+
+#annotation
+ensembl_ids <- rownames(rawdata)
+ensembl_ids <- as.data.frame(ensembl_ids)
+ensembl_ids <- substr(ensembl_ids$ensembl_ids , start = 1 , stop =15)  
+ensembl_ids <- as.vector(ensembl_ids) 
+
+library(biomaRt)
+mart <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")  
+gene_symbols1<- getBM(attributes = c("ensembl_gene_id", "gene_length","hgnc_symbol", "gene_biotype"), 
+                      filters = "ensembl_gene_id",
+                      values =ensembl_ids,
+                      mart = mart)
+
+rawdata10 <- rawdata     
+rawdata10 $ensembl_gene_id = rownames(rawdata)   
+rawdata10 <- rawdata10[,c(184,1:183)]
+rawdata10 $ensembl_gene_id = substr(rawdata10 $ensembl_gene_id, start = 1, stop = 15) 
+
+
+rawdata11 <- merge(rawdata10,gene_symbols1,by="ensembl_gene_id") 
+rawdata11 <- rawdata11[,c(1,185,2:184)] 
+
+
+
+# find & resolve dupplication
+#
+
+
+#find & remove normal samples
+bar <- data.frame(colnames(raw))
+colnames(bar) <- "barcode"
+bar$substr <- substr(bar$barcode, start = 14, stop = 15)
+bar <- bar[order(as.numeric(bar$substr), decreasing = T),]
+C <- bar[bar$substr < 10,]    
+N <- bar[bar$substr>= 10,]     
+rawdata <- raw[ , as.character(bar$barcode)]    
+gr <- c(rep("normal", 4), rep("cancer", 179) )    
+gr <- factor(gr)
+design <- model.matrix(~ 0 + gr)    
+colnames(design)<- levels(gr)
+raw16 <- raw15[, !(colnames(raw15) %in% N$barcode), drop = FALSE]                                      
+colnames(raw16) = substr(colnames(raw16), start = 1, stop = 16)
+
+
+#find & remove outliers
+gene_iqr <- apply(raw16, 1, IQR)
+lower_fence <- quantile(gene_iqr, 0.25) - 1.5 * IQR(gene_iqr)
+upper_fence <- quantile(gene_iqr, 0.75) + 1.5 * IQR(gene_iqr)
+outlier_genes <- rownames(raw16)[gene_iqr < lower_fence | gene_iqr > upper_fence]  #5247 genes
+raw17 <- raw16[!(rownames(raw16) %in% outlier_genes), ]
+
+
+
+#remove genes on chrx,y
+ensemble3 <- as.data.frame(rownames(raw17))
+library(biomaRt)
+mart <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+save(mart , file = "mart.RData")
+gene_symbols3<- getBM(attributes = c("ensembl_gene_id","hgnc_symbol", "chromosome_name","gene_biotype"), 
+                      filters = "hgnc_symbol",
+                      values =ensemble3,
+                      mart = mart) 
+                      
+xy3 <- subset(gene_symbols3, (chromosome_name %in% c("X","Y")))
+raw18 <- raw17[!rownames(raw17) %in% xy3$hgnc_symbol, ]
+
+
+
+#protein coding  
+
+gene_symbols1.pc <- gene_symbols1[gene_symbols1$gene_biotype == "protein_coding", ]
+
+raw19 <- raw18[rownames(raw18) %in% gene_symbols1.pc$hgnc_symbol, ] 
+
+
+
+#filter housekeeping
+#
+#
+#
+
+
+#remove low express gene
+library(edgeR)
+library(limma)
+y <- DGEList(counts = raw20) 
+y <- calcNormFactors(y)
+cpm_values <- cpm(y)
+keep <- filterByExpr(cpm_values) 
+filtered_data <- y[keep, , keep.lib.sizes=FALSE] 
+raw21 <- filtered_data$counts 
+
+
+
+
+#normalization
+#https://www.gencodegenes.org/  Release 44 (GRCh38.p14)  -->Comprehensive gene annotation[GTF]
+library(GenomicFeatures)
+txdb <- makeTxDbFromGFF("C:/../GTF file/genecode/gencode.v44.annotation.gtf",format="gtf")
+exons.list.per.gene <- exonsBy(txdb,by="gene")
+exonic.gene.sizes <- sum(width(reduce(exons.list.per.gene)))
+exonic.gene.sizes1 <- as.data.frame(exonic.gene.sizes)
+save(exonic.gene.sizes1 , file = "exoniclength.RData")    
+
+ensembl_ids.l <- rownames(exonic.gene.sizes1)
+ensembl_ids.l <- as.data.frame(ensembl_ids.l)
+ensembl_ids.l <- substr(ensembl_ids.l$ensembl_ids.l, start = 1 , stop =15)  
+ensembl_ids.l <- as.vector(ensembl_ids.l) #62700
+
+library(biomaRt)
+mart <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+gene_symbols.l<- getBM(attributes = c("ensembl_gene_id", "hgnc_symbol"), 
+                       filters = "ensembl_gene_id",
+                       values =ensembl_ids.l,
+                       mart = mart)   
+
+
+exonic.gene.sizes1$ensembl_gene_id <- substr(rownames(exonic.gene.sizes1), start = 1 , stop =15)  
+merge1 <- merge(gene_symbols.l, exonic.gene.sizes1,by="ensembl_gene_id")  
+
+raw21n <- as.data.frame(rownames(raw21)) 
+colnames(raw21n)[1] = "hgnc_symbol"
+
+subs1 <- subset(merge1, (hgnc_symbol %in% raw21n$hgnc_symbol))
+length <- subs1$exonic.gene.sizes 
+BiocManager::install("DGEobj.utils")
+library("DGEobj.utils")
+
+
+fpkm2 <- convertCounts(raw21, unit = "FPKM", geneLength = length) 
+fpkm2 <- round(fpkm2 ,2) 
+fpkm2.l <- log2(fpkm2+1)
+fpkm2.l <- round(fpkm2.l ,2) 
+
+
+
+###mirna
+#
+gene_symbols1.np <- gene_symbols1[gene_symbols1$gene_biotype == "miRNA", ]
+#
+
+
+
+###lncRNA
+#
+gene_symbols1.np <- gene_symbols1[gene_symbols1$gene_biotype == "lncRNA", ]
+#
+
+
+
+###methylome
+library(illuminaio)
+source("https://raw.githubusercontent.com/YuanTian1991/ChAMP-Script/master/champ.ImportIDAT.R")
+tian0 <- champ.ImportIDAT("C:/R-programing/my thesis/methylIDAT/GDCdata/TCGA-PAAD/harmonized/DNA_Methylation/Masked_Intensities" , arraytype ="450k")    
+beta.tian0 <-  tian0$beta
+library(ChAMP)
+
+#filteration
+fil1 <- champ.filter(beta=beta.tian0,     
+                     M=NULL,
+                     pd=NULL,
+                     intensity=NULL,
+                     Meth=NULL,
+                     UnMeth=NULL,
+                     detP=NULL,
+                     beadcount=NULL,
+                     autoimpute=TRUE,    
+                     filterDetP=TRUE,
+                     ProbeCutoff=0,
+                     SampleCutoff=0.1,
+                     detPcut=0.01,
+                     filterBeads=TRUE,
+                     beadCutoff=0.05,
+                     filterNoCG = TRUE,
+                     filterSNPs = TRUE,
+                     population = NULL,
+                     filterMultiHit = TRUE,
+                     filterXY = TRUE,
+                     fixOutlier = TRUE,
+                     arraytype = "450K")
+
+fil1b <- fil1$beta
+
+#normaliztion
+champ.norm(beta=myLoad$beta,
+           rgSet=myLoad$rgSet,
+           mset=myLoad$mset,
+           resultsDir="./CHAMP_Normalization/",
+           method="BMIQ",
+           plotBMIQ=FALSE,
+           arraytype="450K",
+           cores=3)
+
+
+#batch correction
+combat00 <-  champ.runCombat(beta=myNorm2,
+                             pd=pd1.21,
+                             variablename="Sample_Group",
+                             batchname=c("Slide"),
+                             logitTrans=TRUE)   
+
+
+#prepare final dataframe(using xena)
+#
+
+#remove normal samples
+#
+
+# for genes having more than one probe , the median value was considered 
+
+#m value transformation
+convert_to_M <- function(b) {
+  M <- log2(b / (1 - b))
+  return(M)
+}
+methyl.xena5 <- apply(methyl.xena4, 2, convert_to_M)
+methyl.xena5 <- round(methyl.xena5,3)  
+
+
+
+###mutation data
+#remove normal samples
+#
+
+#filteration
+mutations_f2 <- subset(mutations_filtered, !(IMPACT %in% "MODIFIER")) 
+mutations_f3 <- subset(mutations_f2, !(Variant_Classification %in% "Silent"))   
+mutations_f4 <- subset(mutations_f3, !(Variant_Classification %in% "Splice_Region"))
+
+#
+#
+#
+
+
+#binary data frame
+mutt7 <- reshape2::dcast(mutt6, Hugo_Symbol ~ Tumor_Sample_Barcode, value.var = "Variant_Classification")
+mutt7[is.na(mutt7)] <-"0"
+rownames(mutt7) <- mutt7[,1]
+mutt7 <- mutt7[,-1]
+
