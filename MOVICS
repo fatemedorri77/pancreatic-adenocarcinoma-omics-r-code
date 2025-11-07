@@ -1,0 +1,272 @@
+library(MOVICS)
+
+#feature selection
+elite.fpkm <- getElites(dat = raw.fpkm.m,     #7478*120
+                        method = "cox",
+                        surv.info = clinical.m,    #clinical.m and clinical.m2 both provide similar result
+                        p.cutoff = 0.05,
+                        elite.num = 100) # disabled because cox refers to p.cutoff and it run code without consider elite.num = 100
+
+elite.mir.fpkm <- getElites(dat = fpkm.mir.m,     #68*120
+                        method = "cox",
+                        surv.info = clinical.m, 
+                        p.cutoff = 0.05,
+                        elite.num = 100) 
+
+
+elite.lnc.fpkm <- getElites(dat = fpkm.lnc.m,     #1925*120
+                            method = "cox",
+                            surv.info = clinical.m, 
+                            p.cutoff = 0.05,
+                            elite.num = 100) 
+
+
+elite.methyl.r <- getElites(dat = methyl2.m,       #34370*120
+                            method = "cox",
+                            surv.info = clinical.m, 
+                            p.cutoff = 0.05,
+                            na.action = "rm")  
+
+#creat a list of omics
+mo.data <- list(omics1 = elite.fpkm$elite.dat,
+                omics2 = elite.lnc.fpkm$elite.dat,
+                omics3 = elite.mir.fpkm$elite.dat,
+               omics4 =elite.methyl.r$elite.dat,
+               omics5 =elite.mutation$elite.dat) 
+
+# identify optimal clustering 
+optk.paad <- getClustNum(data = mo.data,
+                        is.binary = c(F,F,F,F,T), # the 4th data is a binary matrix
+                             try.N.clust = 2:8, # try cluster number from 2 to 8
+                             fig.name = "CLUSTER NUMBER OF TCGA-PAAD")   
+
+#omics list
+moic.res.list <-
+  getMOIC(data = mo.data,
+          methodslist = list("SNF", "PINSPlus", "NEMO", "iClusterBayes",
+                             "COCA", "LRAcluster", "ConsensusClustering",
+                             "IntNMF", "CIMLR", "MoCluster"),
+          N.clust = 2,
+          type = c("gaussian", "gaussian", "gaussian", "gaussian","binomial"))
+
+###get consensus 
+cmoic.paad <- getConsensusMOIC(moic.res.list = moic.res.list,
+                                   fig.name = "CONSENSUS HEATMAP",
+                                   distance = "euclidean",
+                                   linkage = "average")
+
+#similarity
+getSilhouette(sil = cmoic.paad$sil, # a sil object returned by   getConsensusMOIC()
+              fig.path = getwd(),
+              fig.name = "SILHOUETTE",
+              height = 0.7,
+              width = 0.5)
+
+
+plotdata <- getStdiz(data = mo.data,
+                         halfwidth = c(2,2,2,2,NA), 
+                         centerFlag = c(T,T,T,T,F), 
+                         scaleFlag = c(T,T,T,T,F))
+
+# comprehensive heatmap 
+feat <- SNF$feat.res
+feat1 <- feat[which(feat$dataset =="omics1"),][1:10,"feature"]
+feat2 <- feat[which(feat$dataset == "omics2"),][1:10,"feature"]
+feat3 <- feat[which(feat$dataset == "omics3"),][1:10,"feature"]
+feat4<- feat[which(feat$dataset == "omics4"),][1:10,"feature"]
+feat5<- feat[which(feat$dataset == "omics5"),][1:10,"feature"]
+annRow <- list(feat1, feat2, feat3, feat4,feat5)
+
+# set color for each omics data
+mRNA.col <- c("#00FF00", "#008000", "#000000", "#800000", "#FF0000")   # #"#00FF00" (green), "#008000" (dark green), "#000000" (black), "#800000" (maroon), "#FF0000" (red)
+lncRNA.col <- c("#6699CC", "white" , "#FF3C38")                         
+mirna.col <-  c("#00CD96" , "#008B66" ,"white","#EE82EE","#D02090")
+meth.col <- c("#0074FE", "#96EBF9", "#FEE900", "#F00003")               
+mut.col <- c("grey90" , "black")
+col.list <- list(mRNA.col, lncRNA.col,mirna.col, meth.col ,mut.col)
+
+
+#snf
+getMoHeatmap(data = plotdata,
+             row.title = c("mRNA","lncRNA","miRNA","Methylation","Mutation"),
+             is.binary = c(F,F,F,F,T), # the 4th data is a binary matrix
+             legend.name = c("mRNA.FPKM","lncRNA.FPKM","miRNA.FPKM","M value","Mutated"),
+             clust.res = moic.res.list$SNF$clust.res, # cluster results
+             clust.dend = moic.res.list$SNF$clust.dend, 
+             color = col.list,
+             annCol = NULL,   # no annotation for samples
+             annColors = NULL,   # no annotation color
+             width = 10,    # width of each subheatmap
+             height = 5,   # height of each subheatmap
+             fig.name = "COMPREHENSIVE HEATMAP OF SNF")
+
+annCol4 <- clinical.m2[,c( "age","Sex", "stage","grade","Tumor.Stage","Metastasis.Stage","Lymph.Node.Stage",
+                           "Lymph.Node.Number","Neoplasm.Status","Neoplasm.Histologic.Type","Histologic.Grading.Tier","Tumor.Site","ICD.0.3.Classification",
+                           "Prior.Cancer.Diagnosis","Surgical.Margin.Resection.Status",
+                           "Therapy.Outcome.Success.Type"), drop = FALSE]
+
+
+#SURVIVAL
+surv.paad <-
+  compSurv(moic.res = cmoic.paad,
+           surv.info = clinical.m2,
+           convt.time = "m", # convert day unit to month
+           surv.median.line = "hv", # draw horizontal and verticalline at median survival
+           xyrs.est = c(1,5), # estimate 5 and 10-year survival  :x-year survival probability can be also estimated 
+           fig.name = "KAPLAN-MEIER CURVE OF CONSENSUSMOIC")
+
+clin.paad2 <-
+  compClinvar(moic.res = cmoic.paad,
+              var2comp = clinical.m2[,-c(9,13,16,17,21,28)], # data.frame needs to summarize
+              strata = NULL, # stratifying variable (NULL indicates 'Subtype')
+              factorVars = c("Sex","fustat","stage","grade","Tumor.Stage","Metastasis.Stage","Lymph.Node.Stage",
+                             "Neoplasm.Status","Neoplasm.Histologic.Type","Histologic.Grading.Tier","Tumor.Site","ICD.0.3.Classification",
+                             "Prior.Cancer.Diagnosis","Surgical.Margin.Resection.Status",
+                             "Therapy.Outcome.Success.Type"), # categorical variables
+              nonnormalVars = "futime" ,# feature(s) to use nonparametric test
+              exactVars = "stage", # feature(s) to use exact test
+              doWord = TRUE, # generate .docx file in local path
+              tab.name = "SUMMARIZATION OF CLINICAL FEATURES")
+
+
+#TMB
+tmb.paad <-
+  compTMB(moic.res = cmoic.paad,
+          maf = maf.m,
+          rmDup = TRUE, # remove duplicated variants per sample
+          rmFLAGS = FALSE, # keep FLAGS mutations
+          exome.size = 38, # estimated exome size  ????????
+          test.method = "nonparametric", # statistical testing method
+          fig.name = "DISTRIBUTION OF TMB AND TITV")    #done with wilcoxon test
+
+#FGA
+fga.paad <-
+  compFGA(moic.res = cmoic.paad,
+          segment = seg.paad.m,
+          iscopynumber = FALSE, # this is a segmented copy number file
+          cnathreshold = 0.2, # threshold to determine CNA gain or loss
+          test.method = "nonparametric", # statistical testing method
+          fig.name = "BARPLOT OF FGA")
+
+#DRUG SENSITIVITY
+drug.paad <-
+  compDrugsen(moic.res = cmoic.paad,
+              norm.expr = raw.fpkm.m[,cmoic.paad$clust.res$samID],
+              drugs = c("Gemcitabine", "5-Fluorouracil" ,"Doxorubicin"), # a vector of drug name
+              tissueType = "digestive_system", # choose specific tissue type
+              test.method = "nonparametric", # statistical testing method
+              prefix = "BOXVIOLIN OF ESTIMATED IC50")
+
+
+#SUBTYPES AGREEMENT
+agree.paad1 <-
+  compAgree(moic.res = cmoic.paad,
+            subt2comp = clinical.m2[,c("grade","stage","Tumor.Stage","Lymph.Node.Stage","Metastasis.Stage")],
+            doPlot = TRUE,
+            box.width = 0.2,
+            fig.name = "AGREEMENT OF CONSENSUSMOIC WITH grade,stage,Tumor.Stage,Lymph.Node.Stage,Metastasis.Stage")
+
+
+# run DEA with edgeR
+library(edgeR)
+runDEA(dea.method = "edger",
+       expr = raw.m,             # raw count data
+       moic.res = cmoic.paad,
+       prefix = "TCGA-PAAD")
+
+
+# run DEA with DESeq2    
+runDEA(dea.method = "deseq2",
+       expr = raw.m,
+       moic.res = cmoic.paad,
+       prefix = "TCGA-PAAD")
+
+# run DEA with limma
+library(limma)
+exp.rawfpkm.m <- exp(raw.fpkm.m)   #reverse log2
+runDEA(dea.method = "limma",
+       expr = exp.rawfpkm.m, # normalized expression data
+       moic.res = cmoic.paad,
+       prefix = "TCGA-PAAD")
+
+#BIOMARKER
+marker.up3 <-
+  runMarker(moic.res = cmoic.paad,
+            dea.method = "limma", # name of DEA method
+            prefix = "TCGA-PAAD", # MUST be the same of argument in runDEA()
+            dat.path = getwd(), # path of DEA files
+            res.path = getwd(), # path to save marker files
+            p.cutoff = 0.05, # p cutoff to identify significant DEGs
+            p.adj.cutoff = 0.05, # padj cutoff to identify significant DEGs
+            dirct = "up", # direction of dysregulation in expression
+            n.marker = 100, # number of biomarkers for each subtype   
+            doplot = TRUE, # generate diagonal heatmap
+            norm.expr = exp.rawfpkm.m, # use normalized expression as heatmap input
+            annCol = annCol4, # sample annotation in heatmap
+            annColors = annColors4, # colors for sample annotation
+            show_rownames = FALSE, # show no rownames (biomarker name)
+            fig.name = "UPREGULATED BIOMARKER HEATMAP")  
+
+
+#GSEA
+runGSEA(moic.res = cmoic.paad,
+          dea.method = "edger", # name of DEA method
+          prefix = "TCGA-PAAD", # MUST be the same of argument in runDEA()
+          dat.path = getwd(), # path of DEA files
+          res.path = getwd(), # path to save GSEA files
+          msigdb.path = GSET.FILE, # MUST be the ABSOLUTE path of msigdb file
+          norm.expr = raw.fpkm.m, # use normalized expression to calculate enrichment score
+          dirct = "up", # direction of dysregulation in pathway
+          p.cutoff = 0.05, # p cutoff to identify significant pathways
+          p.adj.cutoff = 0.25, # padj cutoff to identify significant pathways
+          gsva.method = "gsva", # method to calculate single sample enrichment score
+          norm.method = "mean", # method to calculate subtype-specific enrichment score
+          fig.name = "UPREGULATED hallmarks HEATMAP")
+
+
+
+gsva.res1 <-
+  runGSVA(moic.res = cmoic.paad,
+          norm.expr = raw.fpkm.m,
+          gset.gmt.path = GSET.FILE, # ABSOLUTE path of gene set file
+          gsva.method = "gsva", # method to calculate single sample enrichment score
+          annCol = annCol4,
+          annColors = annColors4,
+          fig.path = getwd(),
+          fig.name = "hallmarks HEATMAP",
+          height = 5,
+          width = 8)
+
+
+
+#NTP
+paad.ntp.pred <- runNTP(expr = raw.fpkm.m,
+                        templates = marker.up2$templates,   #deseq2
+                        doPlot = FALSE)
+#PAM
+paad.pam.pred <- runPAM(train.expr = raw.fpkm.m,
+                        moic.res = cmoic.paad,
+                        test.expr = raw.fpkm.m)
+
+#KAPPA
+runKappa(subt1 = cmoic.paad$clust.res$clust,
+         subt2 = paad.ntp.pred$clust.res$clust,
+         subt1.lab = "CMOIC",
+         subt2.lab = "NTP",
+         fig.name = "CONSISTENCY HEATMAP FOR TCGA between CMOIC and NTP")  
+
+
+# compare survival outcome in Yau cohort
+surv.g2 <-
+  compSurv(moic.res =  ntp2.pred,
+           surv.info = pheno.g3,
+           convt.time = "m", # switch to month   'd':day , 'm':month , 'y':year
+           surv.median.line = "hv", # switch to both
+           fig.name = "KAPLAN-MEIER CURVE OF NTP FOR GEO")
+
+
+
+
+
+
+
