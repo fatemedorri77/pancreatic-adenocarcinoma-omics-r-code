@@ -1,0 +1,50 @@
+###MUTATION ANALYSIS
+
+library(maftools)
+
+laml1 = read.maf(maf = maf.m,   
+                clinicalData = clinical.m,
+                verbose = FALSE)
+
+plotmafSummary(maf = laml1, rmOutlier = TRUE, addStat = 'median', dashboard = TRUE, titvRaw = FALSE)
+
+oncoplot(maf = laml1, draw_titv = TRUE)
+coOncoplot(m1 = maf_cs1, m2 = maf_cs2, m1Name = 'CS1', m2Name = 'CS2', genes = genes, removeNonMutated = TRUE)
+coBarplot(m1 = maf_cs1, m2 = maf_cs2, m1Name = "CS1", m2Name = "CS2")
+
+#driver genes
+maf.paad <- mutation.paad.prepare.1[,c(17,2,6,7,8,10,11:14,38)]   
+#provide appropriate data frame
+maf.paad$Tumor_Sample_Barcode <- substr(maf.paad$Tumor_Sample_Barcode, start = 1, stop = 16)
+maf.paad$Tumor_Sample_Barcode <- gsub("-", ".", maf.paad$Tumor_Sample_Barcode)
+maf.paad1 <- maf.paad[maf.paad$Tumor_Sample_Barcode %in% colnames(mutations_f11), ]  #24374*11
+maf.paad1 <- maf.paad1[maf.paad1$Hugo_Symbol %in% rownames(mutations_f11), ]
+
+
+#Adding and summarizing pfam domains
+#This serves the purpose of knowing what domain in given cancer cohort, is most frequently affected.
+laml.pfam = pfamDomains(maf = laml3, AACol = 'Protein_Change', top = 10)
+
+#Heterogenity
+library("mclust")
+tcga.ab.2972.het = inferHeterogeneity(maf = laml, tsb = 'TCGA-AB-2972', vafCol = 'i_TumorVAF_WU')
+print(tcga.ab.2972.het$clusterMeans)
+plotClusters(clusters = tcga.ab.2972.het)
+
+## IMMUNITY
+library(IOBR)
+elit1 <- elite.fpkm$elite.dat
+elit1 <- elite.fpkm$elite.dat
+cibersort<-deconvo_tme(eset = elit1, method = "cibersort", arrays = TRUE, perm = 100 )
+
+timer<-deconvo_tme(eset = elit1, method = "timer", group_list = rep("stad",dim(elit1)[2]))
+ 
+
+# tide tutorial
+#1:normalize = normal tissue related with a cancer type
+#2:log2(fpkm2+1) 
+#3:for each genes subtracting average value from all samples 
+http://tide.dfci.harvard.edu/
+
+
+
